@@ -1,0 +1,16 @@
+# Node modules
+node_modules/
+
+# macOS specific files
+.DS_Store
+
+# Log files
+*.log
+
+# Build files
+build/
+build/**/*
+
+# IDE files
+.idea/
+.vscode/
