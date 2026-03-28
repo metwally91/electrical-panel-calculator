@@ -1,1 +1,1137 @@
-<!DOCTYPE html>\n<html lang="ar" dir="rtl">\n<head>\n    <meta charset="UTF-8">\n    <meta name="viewport" content="width=device-width, initial-scale=1.0">\n    <title>Electrical Panel Calculator</title>\n    <link rel="stylesheet" href="styles.css">\n    <script src="scripts.js" defer></script>\n</head>\n<body>\n    <header>\n        <h1>حاسبة لوحة الكهرباء</h1>\n    </header>\n    <main>\n        <section id="calculator">\n            <h2>آلات حساب السلك</h2>\n            <form id="calcForm">\n                <!-- Inputs for calculations -->\n                <label for="currentLoad">الحمل الكهربائي (أمبير):</label>\n                <input type="number" id="currentLoad" required>\n                <label for="cableType">نوع الكابل:</label>\n                <select id="cableType">\n                    <option value="copper">نحاس</option>\n                    <option value="aluminum">ألمنيوم</option>\n                </select>\n                <button type="button" onclick="calculateCableSizing()">احسب</button>\n            </form>\n            <div id="results"></div>\n            <button type="button" onclick="exportToExcel()">تصدير إلى Excel</button>\n            <button type="button" onclick="exportToPDF()">تصدير إلى PDF</button>\n        </section>\n    </main>\n    <footer>\n        <p>© 2026 Electrical Panel Calculator</p>\n    </footer>\n</body>\n</html>\n\n<script>\nfunction calculateCableSizing() {\n    // Your cable sizing logic goes here, considering IEC and SBC standards.\n    let load = document.getElementById('currentLoad').value;\n    let type = document.getElementById('cableType').value;\n    // Add calculations based on standards...\n    document.getElementById('results').innerText = 'نتيجة الحساب: ' + (load * 1.5) + ' مم²'; // Example output\n}\n\nfunction exportToExcel() {\n    // Logic to export data to Excel\n    alert('تصدير إلى Excel قيد المعالجة...');\n}\n\nfunction exportToPDF() {\n    // Logic to export data to PDF\n    alert('تصدير إلى PDF قيد ا��معالجة...');\n}\n</script>
+import { useState, useEffect, useRef } from "react";
+import * as XLSX from "SheetJS";
+
+/* ═══════════════════════════════════════════════════════
+   ENGINEERING DATA TABLES
+═══════════════════════════════════════════════════════ */
+const IEC_CABLE = [
+  [1.5,  12.10, 17.5, 19.5, 22,  24,  29.0],
+  [2.5,  7.410, 24,   27,   29,  32,  18.0],
+  [4,    4.610, 32,   36,   37,  42,  11.0],
+  [6,    3.080, 41,   46,   46,  54,  7.30],
+  [10,   1.830, 57,   63,   60,  75,  4.40],
+  [16,   1.150, 76,   85,   78,  100, 2.80],
+  [25,   0.727, 101,  112,  96,  133, 1.75],
+  [35,   0.524, 125,  138,  115, 164, 1.25],
+  [50,   0.387, 151,  168,  138, 198, 0.93],
+  [70,   0.268, 192,  213,  169, 253, 0.65],
+  [95,   0.193, 232,  258,  198, 306, 0.47],
+  [120,  0.153, 269,  299,  227, 354, 0.38],
+  [150,  0.124, 300,  344,  251, 393, 0.30],
+  [185,  0.0991,341,  392,  279, 449, 0.24],
+  [240,  0.0754,400,  461,  320, 528, 0.19],
+  [300,  0.0601,458,  530,  362, 603, 0.15],
+];
+const IEC_TEMP = {25:1.04,30:1.00,35:0.96,40:0.91,45:0.87,50:0.82,55:0.76,60:0.71};
+const NEC_CABLE = [
+  ["14 AWG",2.08,20,8.45],["12 AWG",3.31,25,5.31],["10 AWG",5.26,35,3.33],
+  ["8 AWG",8.37,50,2.09],["6 AWG",13.3,65,1.32],["4 AWG",21.1,85,0.829],
+  ["3 AWG",26.7,100,0.657],["2 AWG",33.6,115,0.521],["1 AWG",42.4,130,0.413],
+  ["1/0 AWG",53.5,150,0.327],["2/0 AWG",67.4,175,0.259],["3/0 AWG",85.0,200,0.206],
+  ["4/0 AWG",107,230,0.163],["250 kcmil",127,255,0.138],["300 kcmil",152,285,0.115],
+  ["350 kcmil",177,310,0.0987],["400 kcmil",203,335,0.0862],
+  ["500 kcmil",253,380,0.0694],["600 kcmil",304,420,0.0578],
+  ["750 kcmil",380,475,0.0464],
+];
+const NEC_TEMP = {21:1.20,27:1.08,30:1.00,32:0.96,35:0.91,38:0.87,40:0.82,43:0.75,46:0.69,49:0.61,52:0.50};
+const BUSBAR_TABLE = [
+  ["20x3",90],["25x3",115],["30x3",135],["40x3",170],["50x5",290],["60x5",345],
+  ["80x5",455],["100x5",565],["80x10",700],["100x10",870],["120x10",1040],["150x10",1300],
+];
+const MCCB_IEC = [16,20,25,32,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250];
+const MCCB_NEC = [15,20,25,30,35,40,50,60,70,80,100,110,125,150,175,200,225,250,300,350,400,450,500,600,800,1000,1200];
+const STANDARDS = [
+  {id:"IEC60364",label:"IEC 60364 / BS 7671",sub:"تمديدات خارجية ومباني",flag:"🇪🇺",color:"#00d4ff"},
+  {id:"IEC61439",label:"IEC 61439",sub:"لوحات داخلية وبارات نحاسية",flag:"⚡",color:"#00ff88"},
+  {id:"NEC",label:"SBC 401 / NEC (NFPA 70)",sub:"الكود السعودي / الأمريكي",flag:"🇸🇦",color:"#ff9f1c"},
+];
+
+/* ═══════════════════════════════════════════════════════
+   ENGINEERING FUNCTIONS
+═══════════════════════════════════════════════════════ */
+function snapTemp(t,tbl){const k=Object.keys(tbl).map(Number).sort((a,b)=>a-b);return k.reduce((p,c)=>Math.abs(c-t)<Math.abs(p-t)?c:p);}
+function getTempFactor(temp,std){const tbl=std==="NEC"?NEC_TEMP:IEC_TEMP;return tbl[snapTemp(temp,tbl)];}
+function getIECCol(m){return({conduit:2,trunking:2,surface:3,tray:3,underground:4,freeair:5})[m]??2;}
+function distributeBreakers(singles,threes){
+  const phases={L1:[],L2:[],L3:[]},totals={L1:0,L2:0,L3:0};
+  threes.forEach(b=>{["L1","L2","L3"].forEach(p=>phases[p].push({...b,is3ph:true}));totals.L1+=b.a;totals.L2+=b.a;totals.L3+=b.a;});
+  [...singles].sort((a,b)=>b.a-a.a).forEach(b=>{
+    const p=Object.entries(totals).sort((a,b)=>a[1]-b[1])[0][0];
+    phases[p].push({...b,is3ph:false});totals[p]+=b.a;
+  });
+  return{phases,totals};
+}
+function calcVD(idx,current,length,std){
+  if(std==="NEC"){const r=NEC_CABLE[idx][3];const vD=1.732*current*length*(r/1000);return(vD/400)*100;}
+  const mVAm=IEC_CABLE[idx][6];return(mVAm*current*length/1000/400)*100;
+}
+function findIECCable(reqI,method,vdMax,current,length,checkVD){
+  const col=getIECCol(method);
+  for(let i=0;i<IEC_CABLE.length;i++){if(IEC_CABLE[i][col]>=reqI){if(!checkVD)return i;if(calcVD(i,current,length,"IEC60364")<=vdMax)return i;}}
+  return IEC_CABLE.length-1;
+}
+function findNECCable(reqI,vdMax,current,length,checkVD){
+  for(let i=0;i<NEC_CABLE.length;i++){if(NEC_CABLE[i][2]>=reqI){if(!checkVD)return i;if(calcVD(i,current,length,"NEC")<=vdMax)return i;}}
+  return NEC_CABLE.length-1;
+}
+function nextMCCB(a,std){const l=std==="NEC"?MCCB_NEC:MCCB_IEC;return l.find(s=>s>=a)||l[l.length-1];}
+const methodLabel={conduit:"Conduit – Method B",trunking:"Trunking – Method B",surface:"Surface/Tray – Method C",tray:"Cable Tray – Method C",underground:"Direct Buried – Method D"};
+
+/* ═══════════════════════════════════════════════════════
+   STYLES
+═══════════════════════════════════════════════════════ */
+const CSS=`
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&family=Share+Tech+Mono&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#060b14;--s1:#0d1526;--s2:#111d35;--s3:#162040;--bd:#1a3060;--bd2:#1e3a72;
+  --l1:#ff4d6d;--l2:#ffd60a;--l3:#4cc9f0;--tx:#dde4f0;--txd:#4a6080;--txm:#8ba0c0;
+  --mono:'Share Tech Mono',monospace;--sans:'Tajawal',sans-serif;--cur:#00d4ff;}
+body{background:var(--bg)}
+.app{font-family:var(--sans);background:var(--bg);min-height:100vh;color:var(--tx);direction:rtl;padding:0 0 80px}
+.hdr{position:relative;padding:36px 24px 28px;text-align:center;border-bottom:1px solid var(--bd);background:linear-gradient(180deg,#0a1428 0%,var(--bg) 100%);overflow:hidden}
+.hdr-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(0,212,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.04) 1px,transparent 1px);background-size:40px 40px;mask-image:radial-gradient(ellipse 80% 100% at 50% 0%,black,transparent)}
+.hdr-eye{display:inline-flex;align-items:center;gap:8px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:30px;padding:5px 16px;font-size:11px;font-weight:700;letter-spacing:3px;color:var(--cur);text-transform:uppercase;margin-bottom:14px}
+.hdr h1{font-size:clamp(20px,4vw,34px);font-weight:900;background:linear-gradient(135deg,#fff 0%,var(--cur) 40%,#a0c8ff 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.25;margin-bottom:6px}
+.hdr p{color:var(--txm);font-size:13px}
+.std-wrap{max-width:900px;margin:0 auto;padding:24px 20px 0}
+.std-lbl{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--txd);margin-bottom:10px}
+.std-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:600px){.std-tabs{grid-template-columns:1fr}}
+.std-tab{background:var(--s1);border:2px solid var(--bd);border-radius:14px;padding:14px 16px;cursor:pointer;text-align:right;transition:all .25s;position:relative;overflow:hidden}
+.std-tab::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--tc,var(--cur));transform:scaleX(0);transform-origin:right;transition:transform .25s}
+.std-tab:hover::before,.std-tab.act::before{transform:scaleX(1)}
+.std-tab.act{border-color:var(--tc,var(--cur));background:rgba(0,212,255,.05);box-shadow:0 0 24px rgba(0,212,255,.08)}
+.std-tab-flag{font-size:22px;margin-bottom:6px}
+.std-tab-name{font-size:13px;font-weight:800;color:var(--tx);line-height:1.3}
+.std-tab-sub{font-size:11px;color:var(--txd);margin-top:2px}
+.std-tab.act .std-tab-name{color:var(--tc,var(--cur))}
+.content{max-width:900px;margin:0 auto;padding:20px 20px 0}
+.sdiv{display:flex;align-items:center;gap:10px;margin:22px 0 14px;font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--txd)}
+.sdiv::before,.sdiv::after{content:'';flex:1;height:1px;background:var(--bd)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:580px){.g2,.g3{grid-template-columns:1fr}}
+.full{grid-column:1/-1}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:16px;padding:18px;position:relative;overflow:hidden}
+.card::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--ca,var(--cur)),transparent);opacity:.4}
+.card-hd{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--ca,var(--cur));margin-bottom:14px}
+.ci{width:26px;height:26px;border-radius:7px;background:rgba(0,212,255,.1);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.fr{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.fr.solo{grid-template-columns:1fr}
+.fld{display:flex;flex-direction:column;gap:5px}
+.fld label{font-size:11px;color:var(--txm);font-weight:600}
+.fld input,.fld select{background:var(--s2);border:1px solid var(--bd);border-radius:10px;color:var(--tx);font-family:var(--mono);font-size:15px;padding:10px 12px;outline:none;width:100%;transition:border-color .2s,box-shadow .2s;direction:ltr;text-align:center}
+.fld select{direction:rtl;text-align:right;font-family:var(--sans);font-size:14px}
+.fld input:focus,.fld select:focus{border-color:var(--cur);box-shadow:0 0 0 3px rgba(0,212,255,.1)}
+.fld input[type=range]{padding:14px 0;cursor:pointer;accent-color:var(--cur)}
+.hint{font-size:10px;color:var(--txd)}
+.calc-btn{width:100%;background:linear-gradient(135deg,#0a3060,var(--cur));border:none;border-radius:14px;color:#fff;font-family:var(--sans);font-size:17px;font-weight:800;padding:16px;cursor:pointer;transition:opacity .2s,transform .1s;margin-top:20px;letter-spacing:1px;box-shadow:0 6px 30px rgba(0,212,255,.25);position:relative;overflow:hidden}
+.calc-btn::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.1),transparent);transform:translateX(-100%);transition:transform .5s}
+.calc-btn:hover::after{transform:translateX(100%)}
+.calc-btn:hover{opacity:.92;transform:translateY(-1px)}
+.calc-btn:active{transform:translateY(0)}
+/* results */
+.res-hdr{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:20px}
+.res-title{font-size:15px;font-weight:800;color:var(--tx)}
+.used-std{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+.ph-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+@media(max-width:480px){.ph-row{grid-template-columns:1fr}}
+.ph{border-radius:14px;padding:16px;text-align:center;position:relative;overflow:hidden}
+.ph-l1{background:linear-gradient(135deg,rgba(255,77,109,.14),rgba(255,77,109,.04));border:1px solid rgba(255,77,109,.35)}
+.ph-l2{background:linear-gradient(135deg,rgba(255,214,10,.14),rgba(255,214,10,.04));border:1px solid rgba(255,214,10,.35)}
+.ph-l3{background:linear-gradient(135deg,rgba(76,201,240,.14),rgba(76,201,240,.04));border:1px solid rgba(76,201,240,.35)}
+.ph-n{font-size:11px;font-weight:800;letter-spacing:2px;margin-bottom:6px}
+.ph-l1 .ph-n{color:var(--l1)}.ph-l2 .ph-n{color:var(--l2)}.ph-l3 .ph-n{color:var(--l3)}
+.ph-v{font-family:var(--mono);font-size:28px;font-weight:700;line-height:1}
+.ph-l1 .ph-v{color:var(--l1)}.ph-l2 .ph-v{color:var(--l2)}.ph-l3 .ph-v{color:var(--l3)}
+.ph-u{font-size:11px;color:var(--txd);margin-top:3px}
+.ph-r{font-size:10px;color:var(--txm);margin-top:2px}
+.ph-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:10px;overflow:hidden}
+.ph-bar-f{height:100%;border-radius:2px;transition:width .5s}
+.ph-l1 .ph-bar-f{background:var(--l1)}.ph-l2 .ph-bar-f{background:var(--l2)}.ph-l3 .ph-bar-f{background:var(--l3)}
+.imb{display:inline-flex;align-items:center;gap:8px;padding:7px 18px;border-radius:20px;font-size:13px;font-weight:700;margin-bottom:18px}
+.imb-ok{background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.3);color:#00ff88}
+.imb-warn{background:rgba(255,214,10,.08);border:1px solid rgba(255,214,10,.3);color:var(--l2)}
+.imb-bad{background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.3);color:var(--l1)}
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{background:var(--s2);color:var(--txd);font-weight:700;padding:9px 12px;text-align:center;font-size:10px;letter-spacing:1.5px;text-transform:uppercase}
+.tbl td{padding:8px 12px;text-align:center;border-bottom:1px solid rgba(26,48,96,.5);font-family:var(--mono);font-size:12px;vertical-align:middle}
+.tbl tr:hover td{background:rgba(0,212,255,.03)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-left:5px}
+.dot-l1{background:var(--l1)}.dot-l2{background:var(--l2)}.dot-l3{background:var(--l3)}
+.tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--sans)}
+.rec-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+@media(max-width:500px){.rec-row{grid-template-columns:1fr}}
+.rec{background:var(--s1);border:1px solid var(--bd);border-radius:14px;padding:20px;text-align:center;position:relative;overflow:hidden}
+.rec::before{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--rc,var(--cur)),transparent)}
+.rec-lbl{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--txd);margin-bottom:10px}
+.rec-val{font-family:var(--mono);font-size:34px;font-weight:700;color:var(--rc,var(--cur));line-height:1}
+.rec-unit{font-size:12px;color:var(--txd);margin-top:4px}
+.rec-det{font-size:11px;color:var(--txm);margin-top:10px;line-height:1.7;border-top:1px solid var(--bd);padding-top:10px;text-align:right}
+.rec-det strong{color:var(--rc,var(--cur))}
+.dte-t{width:100%;font-size:12px}
+.dte-t td{padding:6px 10px;border-bottom:1px solid rgba(26,48,96,.4);color:var(--txm)}
+.dte-t td:first-child{color:var(--tx);font-weight:600;width:60%}
+.dte-t td:last-child{font-family:var(--mono);color:var(--cur);text-align:center}
+.note{background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.15);border-radius:12px;padding:13px 16px;font-size:12px;color:var(--txm);line-height:1.85;margin-top:16px}
+.note strong{color:#00d4ff}
+.vd-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;font-family:var(--mono);margin-top:4px}
+.vd-ok{background:rgba(0,255,136,.1);border:1px solid rgba(0,255,136,.3);color:#00ff88}
+.vd-bad{background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.3);color:var(--l1)}
+/* EXPORT SECTION */
+.exp-section{background:linear-gradient(135deg,#0d1a2e,#0a1220);border:1px solid #1a3a6a;border-radius:20px;padding:24px;margin-bottom:20px}
+.exp-title{font-size:13px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#00d4ff;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.exp-sub{font-size:11px;color:var(--txm);margin-bottom:20px;line-height:1.5}
+.exp-btns{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:480px){.exp-btns{grid-template-columns:1fr}}
+.exp-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:20px 16px;border-radius:16px;border:none;cursor:pointer;font-family:var(--sans);transition:all .25s;position:relative;overflow:hidden}
+.exp-btn:hover{transform:translateY(-2px)}
+.exp-btn:active{transform:translateY(0)}
+.exp-btn-pdf{background:linear-gradient(135deg,#1a0a0a,#2d0808);border:1px solid #8b1a1a;box-shadow:0 4px 20px rgba(220,38,38,.15)}
+.exp-btn-pdf:hover{border-color:#dc2626;box-shadow:0 8px 30px rgba(220,38,38,.25)}
+.exp-btn-xl{background:linear-gradient(135deg,#0a1a0a,#082d12);border:1px solid #166534;box-shadow:0 4px 20px rgba(22,163,74,.15)}
+.exp-btn-xl:hover{border-color:#16a34a;box-shadow:0 8px 30px rgba(22,163,74,.25)}
+.exp-btn-icon{font-size:32px;line-height:1}
+.exp-btn-label{font-size:15px;font-weight:800;letter-spacing:.5px}
+.exp-btn-pdf .exp-btn-label{color:#ef4444}
+.exp-btn-xl .exp-btn-label{color:#22c55e}
+.exp-btn-desc{font-size:10px;color:var(--txm);text-align:center;line-height:1.5}
+.exp-shine{position:absolute;inset:0;background:linear-gradient(135deg,transparent 40%,rgba(255,255,255,.04) 50%,transparent 60%);transform:translateX(-100%);transition:transform .6s}
+.exp-btn:hover .exp-shine{transform:translateX(100%)}
+.exp-loading{opacity:.6;cursor:not-allowed;pointer-events:none}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.anim{animation:fadeUp .4s ease both}
+.a1{animation-delay:.05s}.a2{animation-delay:.1s}.a3{animation-delay:.15s}.a4{animation-delay:.2s}
+`;
+
+/* ═══════════════════════════════════════════════════════
+   PDF EXPORT  (jsPDF + autoTable)
+═══════════════════════════════════════════════════════ */
+function buildPDF(result, proj, stdInfo) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = 210, H = 297, M = 15;
+  const stdColors = { IEC60364:[0,164,255], IEC61439:[0,200,120], NEC:[255,159,28] };
+  const stdRgb = stdColors[result.std] || [0,164,255];
+  const today = new Date().toLocaleDateString("en-GB");
+  const rptNo = `EPR-${Date.now().toString().slice(-6)}`;
+
+  const drawPageHeader = (pageNum, totalPages) => {
+    // Dark navy header bar
+    doc.setFillColor(6,11,20);
+    doc.rect(0,0,W,38,"F");
+    doc.setFillColor(...stdRgb);
+    doc.rect(0,35,W,3,"F");
+
+    // Left side: standard badge
+    doc.setFillColor(...stdRgb.map(v=>Math.min(255,v+40)));
+    doc.roundedRect(M,7,54,22,3,3,"F");
+    doc.setTextColor(6,11,20);
+    doc.setFontSize(7); doc.setFont("helvetica","bold");
+    doc.text("ENGINEERING STANDARD",M+27,13,{align:"center"});
+    doc.setFontSize(9); doc.setFont("helvetica","bold");
+    doc.text(stdInfo.label,M+27,20,{align:"center"});
+    doc.setFontSize(6);
+    doc.text(result.std==="IEC60364"?"External Wiring & Buildings":result.std==="IEC61439"?"Switchgear & Controlgear":"Saudi Building Code / NFPA 70",M+27,26,{align:"center"});
+
+    // Center: title
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(13); doc.setFont("helvetica","bold");
+    doc.text("ELECTRICAL PANEL DESIGN REPORT",W/2,16,{align:"center"});
+    doc.setFontSize(8); doc.setFont("helvetica","normal");
+    doc.setTextColor(160,190,220);
+    doc.text("Panel Load Balancing & Cable Sizing Calculation",W/2,24,{align:"center"});
+
+    // Right: date/page
+    doc.setTextColor(120,160,200);
+    doc.setFontSize(7); doc.setFont("helvetica","normal");
+    doc.text(`Date: ${today}`,W-M,13,{align:"right"});
+    doc.text(`Report No: ${rptNo}`,W-M,19,{align:"right"});
+    doc.text(`Page ${pageNum} of ${totalPages}`,W-M,25,{align:"right"});
+  };
+
+  const drawPageFooter = () => {
+    doc.setFillColor(6,11,20);
+    doc.rect(0,H-14,W,14,"F");
+    doc.setFillColor(...stdRgb);
+    doc.rect(0,H-14,W,1,"F");
+    doc.setFontSize(6.5); doc.setFont("helvetica","italic");
+    doc.setTextColor(80,110,150);
+    doc.text("This report is generated by the Electrical Panel Design Calculator and shall be verified by a licensed electrical engineer before implementation.",M,H-8);
+    doc.setFont("helvetica","bold");
+    doc.setTextColor(...stdRgb);
+    doc.text(`Ref: ${result.std==="NEC"?"NEC NFPA 70 / SBC 401":"IEC 60364-5-52 / IEC 60228"}`,M,H-4);
+    doc.text("CONFIDENTIAL - FOR ENGINEERING USE ONLY",W-M,H-4,{align:"right"});
+  };
+
+  const sectionTitle = (text, y, color=[0,164,255]) => {
+    doc.setFillColor(...color.map(v=>Math.round(v*0.15)));
+    doc.rect(M,y-4,W-2*M,7,"F");
+    doc.setFillColor(...color);
+    doc.rect(M,y-4,2,7,"F");
+    doc.setFontSize(9); doc.setFont("helvetica","bold");
+    doc.setTextColor(...color);
+    doc.text(text.toUpperCase(),M+5,y+0.5);
+    return y+8;
+  };
+
+  /* ── PAGE 1 ── */
+  drawPageHeader(1,2);
+
+  let y = 46;
+
+  // Project Information
+  y = sectionTitle("01 · Project Information",y,stdRgb);
+  const projData = [
+    ["Project Name",proj.projectName||"—","Client / Owner",proj.client||"—"],
+    ["Project Number",proj.projectNo||rptNo,"Engineer",proj.engineer||"—"],
+    ["Location",proj.location||"—","Report Date",today],
+    ["Panel Tag / ID",proj.panelId||"MDB-01","Voltage System","400 / 230 V, 50 Hz, 3Ph+N"],
+  ];
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M},
+    head:[],
+    body:projData,
+    styles:{fontSize:8.5,cellPadding:3.5,lineColor:[26,48,96],lineWidth:0.3},
+    columnStyles:{
+      0:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:38},
+      1:{fillColor:[17,29,53],textColor:[220,230,240],cellWidth:52},
+      2:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:38},
+      3:{fillColor:[17,29,53],textColor:[220,230,240],cellWidth:52},
+    },
+    theme:"grid",
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Input Parameters
+  y = sectionTitle("02 · Design Input Parameters",y,stdRgb);
+  const inputs = [
+    ["Single-Phase Breakers",`${result.sc || "—"} breakers × ${result.sa || "—"} A each`,"Three-Phase Breakers",`${result.tc || 0} breakers × ${result.ta || 0} A each`],
+    ["Diversity / Demand Factor",`${result.df} (${Math.round(result.df*100)}%)`,"Installation Method",methodLabel[result.derating?.method]||"—"],
+    ["Ambient Temperature",`${result.derating?.temp||"—"} °C`,"Engineering Standard",stdInfo.label],
+    ...(result.vdResult?[["Cable Length",`${result.derating?.length||"—"} m`,"Max. Voltage Drop",`${result.vdResult?.max||3} %`]]:
+    result.std==="IEC61439"?[["Conductor Type",result.condType||"Flexible Cu","Arrangement",result.arrangement||"Touching"]]:[]),
+  ];
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M},
+    body:inputs,
+    styles:{fontSize:8.5,cellPadding:3.5,lineColor:[26,48,96],lineWidth:0.3},
+    columnStyles:{
+      0:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:42},
+      1:{fillColor:[17,29,53],textColor:[220,230,240],cellWidth:48},
+      2:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:42},
+      3:{fillColor:[17,29,53],textColor:[220,230,240],cellWidth:48},
+    },
+    theme:"grid",
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Phase Balance Summary
+  y = sectionTitle("03 · Phase Balance Summary",y,stdRgb);
+  const phColors = {L1:[220,50,80],L2:[200,170,10],L3:[50,170,210]};
+  ["L1","L2","L3"].forEach((ph,i)=>{
+    const x = M + i*(W-2*M)/3 + 1;
+    const w = (W-2*M)/3 - 2;
+    const val = result.dt[ph];
+    const isMax = val===result.maxI;
+    doc.setFillColor(isMax?30:15, isMax?8:15, isMax?8:25);
+    doc.roundedRect(x,y,w,26,3,3,"F");
+    doc.setDrawColor(...phColors[ph]);
+    doc.roundedRect(x,y,w,26,3,3,"S");
+    doc.setFontSize(7); doc.setFont("helvetica","bold");
+    doc.setTextColor(...phColors[ph]);
+    doc.text(ph,x+w/2,y+6,{align:"center"});
+    doc.setFontSize(16); doc.setFont("helvetica","bold");
+    doc.setTextColor(255,255,255);
+    doc.text(`${val.toFixed(1)} A`,x+w/2,y+17,{align:"center"});
+    doc.setFontSize(7); doc.setFont("helvetica","normal");
+    doc.setTextColor(120,150,180);
+    doc.text(`Raw: ${result.totals[ph].toFixed(1)} A | After DF(${result.df})`,x+w/2,y+23,{align:"center"});
+  });
+  y += 30;
+
+  // Imbalance pill
+  const imbOk = result.imbPct<5;
+  doc.setFillColor(imbOk?0:200, imbOk?180:150, imbOk?80:0);
+  doc.setFontSize(8.5); doc.setFont("helvetica","bold");
+  doc.setTextColor(imbOk?6:255, imbOk?20:255, imbOk?10:255);
+  const imbText = `Phase Imbalance: ${result.imbPct.toFixed(1)}%  |  Status: ${imbOk?"EXCELLENT – Meets All Standards":result.imbPct<15?"ACCEPTABLE – Within Limits":"POOR – Re-distribution Required"}`;
+  doc.setFillColor(imbOk?0:result.imbPct<15?160:180, imbOk?160:result.imbPct<15?130:0, imbOk?80:0);
+  doc.roundedRect(M,y,W-2*M,8,2,2,"F");
+  doc.setTextColor(255,255,255);
+  doc.text(imbText,W/2,y+5.5,{align:"center"});
+  y += 14;
+
+  // Load Distribution Table
+  y = sectionTitle("04 · Load Distribution Table",y,stdRgb);
+  const distRows = ["L1","L2","L3"].map(ph=>{
+    const s=result.phases[ph].filter(b=>!b.is3ph);
+    const t=result.phases[ph].filter(b=>b.is3ph);
+    return [
+      ph,
+      s.map(b=>`${b.label}(${b.a}A)`).join(", ")||(t.length>0?"":"-"),
+      t.map(b=>`${b.label}(3φ-${b.a}A)`).join(", ")||"-",
+      s.length+t.length,
+      `${result.totals[ph].toFixed(1)} A`,
+      `${result.dt[ph].toFixed(1)} A`,
+    ];
+  });
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M},
+    head:[["Phase","Single-Phase Breakers","Three-Phase Breakers","Qty","Raw Total","After DF"]],
+    body:distRows,
+    styles:{fontSize:8,cellPadding:3,lineColor:[26,48,96],lineWidth:0.3,textColor:[200,215,235]},
+    headStyles:{fillColor:[13,21,50],textColor:stdRgb,fontStyle:"bold",fontSize:7.5,halign:"center"},
+    columnStyles:{0:{cellWidth:14,halign:"center",fontStyle:"bold"},1:{cellWidth:55},2:{cellWidth:42},3:{cellWidth:10,halign:"center"},4:{cellWidth:20,halign:"center"},5:{cellWidth:20,halign:"center",fontStyle:"bold"}},
+    alternateRowStyles:{fillColor:[15,24,42]},
+    bodyStyles:{fillColor:[13,19,36]},
+    theme:"grid",
+  });
+  y = doc.lastAutoTable.finalY + 5;
+
+  drawPageFooter();
+
+  /* ── PAGE 2 ── */
+  doc.addPage();
+  drawPageHeader(2,2);
+  y = 46;
+
+  // Derating Factors
+  y = sectionTitle("05 · Derating & Correction Factors",y,stdRgb);
+  const drRows = [
+    ["Ambient Temperature",`${result.derating.temp} °C`,"Temperature Correction Factor (Kt)",result.derating.kt],
+    ...(result.derating.method?[["Installation Method",methodLabel[result.derating.method]||result.derating.method,"Required Cable Capacity (Iz req.)",`${result.derating.reqI} A`]]:[]),
+    ...(result.derating.gf?[["Grouping Factor (Cg)",result.derating.gf,"Arrangement Factor",result.derating.arrF||"1.00"]]:[]),
+    ["Max. Design Current (Ib)",`${result.maxI.toFixed(2)} A`,"Min. Phase Current",`${result.minI.toFixed(2)} A`],
+    ...(result.vdResult?[["Cable Length",`${result.derating.length||"—"} m`,"Calculated Voltage Drop",`${result.vdResult.vd} % (Max: ${result.vdResult.max} %)`]]:[]),
+  ];
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M},
+    body:drRows,
+    styles:{fontSize:8.5,cellPadding:3.5,lineColor:[26,48,96],lineWidth:0.3},
+    columnStyles:{
+      0:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:52},
+      1:{fillColor:[17,29,53],textColor:[220,230,240],cellWidth:38},
+      2:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:52},
+      3:{fillColor:[17,29,53],textColor:[220,230,240],cellWidth:38},
+    },
+    theme:"grid",
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Cable & MCCB Recommendation
+  y = sectionTitle("06 · Cable & Protection Recommendations",y,stdRgb);
+  const recRows = [
+    ["RECOMMENDED CABLE SECTION",result.cableRec.section,"",""],
+    ["Conductor Material",result.cableRec.conductor,"Cable Configuration",result.cableRec.config],
+    ["Nominal Capacity (Before Correction)",`${result.cableRec.nominal} A`,"Derated Capacity (After Correction)",`${result.cableRec.derated} A`],
+    ...(result.vdResult?[["Voltage Drop",`${result.vdResult.vd} %`,"VD Selection",result.vdResult.driven?"Yes – VD Governed":"No – Current Governed"]]:[]),
+    ["MAIN CIRCUIT BREAKER (MCCB)",`${result.mccbA} A`,"Breaker Type",result.std==="NEC"?"NEC 240.6 Standard Rating":"IEC 60947-2 MCCB"],
+    ["Minimum Short-Circuit Rating","Ics ≥ 25 kA (IEC) / 10 kA (NEC)","Recommended Pole",`3-Pole TP + N | 400V`],
+  ];
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M},
+    body:recRows,
+    styles:{fontSize:8.5,cellPadding:4,lineColor:[26,48,96],lineWidth:0.3,textColor:[200,215,235]},
+    columnStyles:{
+      0:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:60},
+      1:{fillColor:[17,29,53],textColor:stdRgb,fontStyle:"bold"},
+      2:{fontStyle:"bold",fillColor:[13,21,38],textColor:[140,170,200],cellWidth:52},
+      3:{fillColor:[17,29,53],textColor:[200,215,235]},
+    },
+    theme:"grid",
+    willDrawCell:(data)=>{
+      if(data.row.index===0&&data.column.index===0){doc.setFillColor(10,30,60);}
+      if(data.row.index===4&&data.column.index===0){doc.setFillColor(10,30,60);}
+    },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Calculation Summary
+  y = sectionTitle("07 · Calculation Methodology",y,stdRgb);
+  const notes = result.std==="IEC60364"
+    ? ["Standard: IEC 60364-5-52:2009 + BS 7671:2018 (18th Edition)","Cable capacity from Table B.52.4 (Copper XLPE, 90°C conductor temp)","Temperature correction per Table B.52.14 (base 30°C, XLPE insulation)","Voltage drop calculated using mV/A/m values for balanced 3-phase system","Cable selection governed by the more onerous of: current capacity or voltage drop criteria","Diversity factor applied to all single-phase and three-phase loads simultaneously","Phase balancing achieved using Best-Fit Decreasing (BFD) algorithm"]
+    : result.std==="IEC61439"
+    ? ["Standard: IEC 61439-1:2011 / IEC 61439-2:2011 (Low-voltage switchgear assemblies)","Internal cable capacity based on Method E (Free Air) from IEC 60364-5-52 Table B.52.3","Voltage drop calculation omitted – internal distances < 2 m (negligible effect)","Temperature correction applied for enclosure internal temperature","Grouping factor (Cg) applied per number of parallel conductors","Busbar selection from standard cross-section table for solid copper (99.9% Cu)"]
+    : ["Standard: NEC NFPA 70 / SBC 401 (Saudi Building Code – Electrical)","Cable ampacity from NEC Table 310.16 – Copper THWN-2 conductors (75°C column)","Temperature correction per NEC 310.15(B)(2)(a) – 30°C base temperature","Forced correction factor applied for Gulf climate conditions (≥ 45°C)","Voltage drop: NEC recommends max 3% feeder / 2% branch circuit","MCCB rating selected per NEC 240.6 standard ampere ratings"];
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M},
+    head:[["Item","Calculation Reference & Notes"]],
+    body:notes.map((n,i)=>[String(i+1).padStart(2,"0"),n]),
+    styles:{fontSize:8,cellPadding:3.5,lineColor:[26,48,96],lineWidth:0.3,textColor:[190,210,230]},
+    headStyles:{fillColor:[13,21,50],textColor:stdRgb,fontStyle:"bold",fontSize:7.5},
+    columnStyles:{0:{cellWidth:10,halign:"center",fontStyle:"bold",fillColor:[13,21,38],textColor:stdRgb},1:{fillColor:[13,19,36]}},
+    alternateRowStyles:{fillColor:[15,24,42]},
+    theme:"grid",
+  });
+  y = doc.lastAutoTable.finalY + 10;
+
+  // Signature block
+  if(y < H-70){
+    const sigY = Math.max(y, H-68);
+    doc.setDrawColor(...stdRgb);
+    doc.setLineWidth(0.3);
+    ["Prepared By","Checked By","Approved By"].forEach((lbl,i)=>{
+      const sx = M + i*((W-2*M)/3) + 2;
+      const sw = (W-2*M)/3 - 4;
+      doc.setFillColor(10,18,35);
+      doc.roundedRect(sx,sigY,sw,42,2,2,"F");
+      doc.setDrawColor(...stdRgb.map(v=>Math.round(v*0.5)));
+      doc.roundedRect(sx,sigY,sw,42,2,2,"S");
+      doc.setFontSize(7); doc.setFont("helvetica","bold");
+      doc.setTextColor(...stdRgb);
+      doc.text(lbl.toUpperCase(),sx+sw/2,sigY+6,{align:"center"});
+      doc.setDrawColor(30,50,90);
+      doc.line(sx+4,sigY+30,sx+sw-4,sigY+30);
+      doc.setFontSize(6.5); doc.setFont("helvetica","normal");
+      doc.setTextColor(80,100,130);
+      doc.text(i===0?(proj.engineer||"Electrical Engineer"):"Name / Signature",sx+sw/2,sigY+36,{align:"center"});
+      doc.text(`Date: ${today}`,sx+sw/2,sigY+41,{align:"center"});
+    });
+  }
+
+  drawPageFooter();
+  doc.save(`Panel_Design_Report_${proj.panelId||"MDB"}_${today.replace(/\//g,"-")}.pdf`);
+}
+
+/* ═══════════════════════════════════════════════════════
+   EXCEL EXPORT  (SheetJS)
+═══════════════════════════════════════════════════════ */
+function buildExcel(result, proj, stdInfo) {
+  const wb = XLSX.utils.book_new();
+  const today = new Date().toLocaleDateString("en-GB");
+  const rptNo = `EPR-${Date.now().toString().slice(-6)}`;
+
+  // Helper styles (for cells with write_xlsx + styling you'd need xlsx-style, 
+  // we use SheetJS community and set fill colors via !cols and !rows + cell format)
+  const H = (v) => ({ v, t:"s", s:{font:{bold:true,color:{rgb:"00D4FF"}}, fill:{fgColor:{rgb:"0D1526"}}} });
+  const V = (v) => ({ v, t:"s", s:{fill:{fgColor:{rgb:"111D35"}}} });
+  const NUM = (v) => ({ v, t:"n", z:"0.00" });
+
+  /* ── SHEET 1: SUMMARY DASHBOARD ── */
+  const s1 = [
+    ["ELECTRICAL PANEL DESIGN REPORT","","","","","",""],
+    [`Standard: ${stdInfo.label}`,"","","","Report No:",rptNo,""],
+    [`Project: ${proj.projectName||"—"}`,"","","","Date:",today,""],
+    [`Client: ${proj.client||"—"}`,"","","","Engineer:",proj.engineer||"—",""],
+    [`Panel ID: ${proj.panelId||"MDB-01"}`,"","","","Location:",proj.location||"—",""],
+    ["","","","","","",""],
+    ["PHASE BALANCE SUMMARY","","","","","",""],
+    ["Phase","Raw Total (A)","After DF (A)","% of Max","Status","",""],
+    ...["L1","L2","L3"].map(ph=>[
+      ph,
+      result.totals[ph],
+      +result.dt[ph].toFixed(2),
+      +((result.dt[ph]/result.maxI)*100).toFixed(1),
+      result.dt[ph]===result.maxI?"▲ HIGHEST":result.dt[ph]===result.minI?"▼ LOWEST":"",
+      "","",
+    ]),
+    ["","","","","","",""],
+    ["Phase Imbalance %",+result.imbPct.toFixed(2),"","Status",result.imbPct<5?"EXCELLENT":result.imbPct<15?"ACCEPTABLE":"POOR – REVIEW","",""],
+    ["Max Design Current (Ib)",+result.maxI.toFixed(2),"A","Avg Phase Current",+result.avgI.toFixed(2),"A",""],
+    ["","","","","","",""],
+    ["DERATING FACTORS","","","","","",""],
+    ["Ambient / Internal Temperature",`${result.derating.temp} °C`,"","Temp. Correction Factor (Kt)",result.derating.kt,"",""],
+    ...(result.derating.method?[["Installation Method",methodLabel[result.derating.method]||"","","Required Iz (after derating)",`${result.derating.reqI} A`,"",""]]:
+    result.derating.gf?[["Grouping Factor (Cg)",result.derating.gf,"","Arrangement Factor",result.derating.arrF,"",""]]:
+    []),
+    ...(result.vdResult?[["Cable Length",`${result.derating.length||"—"} m`,"","Voltage Drop Calculated",`${result.vdResult.vd} %`,"",""],
+    ["Max Allowed VD %",`${result.vdResult.max} %`,"","VD Selection Governed",result.vdResult.driven?"YES":"NO","",""]]:
+    []),
+    ["","","","","","",""],
+    ["RECOMMENDATIONS","","","","","",""],
+    ["Cable Section",result.cableRec.section,"","Conductor",result.cableRec.conductor,"",""],
+    ["Nominal Capacity",`${result.cableRec.nominal} A`,"","Derated Capacity",`${result.cableRec.derated} A`,"",""],
+    ["Cable Configuration",result.cableRec.config,"","","","",""],
+    ["Main MCCB Rating",`${result.mccbA} A`,"","MCCB Standard",result.std==="NEC"?"NEC 240.6":"IEC 60947-2","",""],
+    ["Min. Short-Circuit Rating","Ics ≥ 25 kA (IEC) / 10 kA (NEC)","","Poles","3-Pole TP + Neutral","",""],
+  ];
+  const ws1 = XLSX.utils.aoa_to_sheet(s1);
+  ws1["!cols"] = [{wch:32},{wch:20},{wch:10},{wch:30},{wch:20},{wch:12},{wch:12}];
+  ws1["!merges"] = [
+    {s:{r:0,c:0},e:{r:0,c:6}},
+    {s:{r:6,c:0},e:{r:6,c:6}},
+    {s:{r:13,c:0},e:{r:13,c:6}},
+    {s:{r:20,c:0},e:{r:20,c:6}},
+  ];
+  XLSX.utils.book_append_sheet(wb, ws1, "Summary_Dashboard");
+
+  /* ── SHEET 2: LOAD DISTRIBUTION ── */
+  const s2rows = [
+    ["LOAD DISTRIBUTION TABLE","","","","","","",""],
+    [`Standard: ${stdInfo.label}  |  Diversity Factor: ${result.df}  |  Date: ${today}`,"","","","","","",""],
+    ["","","","","","","",""],
+    ["Phase","Breaker ID","Type","Rating (A)","Phase Contribution (A)","Phase Total Raw (A)","After DF (A)","Notes"],
+  ];
+  ["L1","L2","L3"].map(ph=>{
+    result.phases[ph].forEach((b,i)=>{
+      s2rows.push([
+        i===0?ph:"",
+        b.label,
+        b.is3ph?"3-Phase":"Single-Phase",
+        b.a,
+        b.a,
+        i===0?result.totals[ph]:"",
+        i===0?+result.dt[ph].toFixed(2):"",
+        b.is3ph?"Appears on all 3 phases":"",
+      ]);
+    });
+    s2rows.push(["","","","","","","",""]);
+  });
+  s2rows.push(["TOTAL","","","","","","",""]);
+  s2rows.push(["All Phases Combined (Σ 3-Phase equivalent)","","","",
+    +((result.totals.L1+result.totals.L2+result.totals.L3)/3).toFixed(2),
+    +((result.totals.L1+result.totals.L2+result.totals.L3)/3).toFixed(2),
+    +((result.dt.L1+result.dt.L2+result.dt.L3)/3).toFixed(2),"Average per phase"]);
+
+  const ws2 = XLSX.utils.aoa_to_sheet(s2rows);
+  ws2["!cols"] = [{wch:14},{wch:14},{wch:16},{wch:14},{wch:22},{wch:22},{wch:16},{wch:30}];
+  ws2["!merges"] = [{s:{r:0,c:0},e:{r:0,c:7}},{s:{r:1,c:0},e:{r:1,c:7}}];
+  XLSX.utils.book_append_sheet(wb, ws2, "Load_Distribution");
+
+  /* ── SHEET 3: STEP-BY-STEP CALCULATION ── */
+  const s3 = [
+    ["STEP-BY-STEP CALCULATION","","",""],
+    [`Engineering Standard: ${stdInfo.label}  |  Ref: ${result.std==="NEC"?"NEC NFPA 70 / SBC 401":"IEC 60364-5-52"}`,"","",""],
+    ["","","",""],
+    ["STEP","PARAMETER","VALUE","FORMULA / NOTE"],
+    ["1","Total Single-Phase Load (raw)",`${result.totals.L1.toFixed(1)} A (L1) / ${result.totals.L2.toFixed(1)} A (L2) / ${result.totals.L3.toFixed(1)} A (L3)`,"Sum of all single-phase breaker ratings per phase"],
+    ["2","Diversity / Demand Factor (DF)",result.df,`Applied to all loads: Idesign = Iraw × ${result.df}`],
+    ["3","Design Current per Phase",`${result.dt.L1.toFixed(2)} / ${result.dt.L2.toFixed(2)} / ${result.dt.L3.toFixed(2)} A`,"Idesign = Iraw × DF"],
+    ["4","Maximum Design Current (Ib)",`${result.maxI.toFixed(2)} A`,"max(IL1, IL2, IL3) – governs cable selection"],
+    ["5","Ambient Temperature",`${result.derating.temp} °C`,"Site ambient or enclosure internal temperature"],
+    ["6","Temperature Correction Factor (Kt)",result.derating.kt,result.std==="NEC"?"NEC 310.15(B)(2)(a) – 30°C base":"IEC 60364-5-52 Table B.52.14 – 30°C base, XLPE"],
+    ...(result.derating.gf?[["6b","Grouping Factor (Cg)",result.derating.gf,"IEC 61439 – based on number of parallel conductors"],["6c","Arrangement Factor",result.derating.arrF,"1.0 spaced / 0.9 touching"]]:
+    result.derating.method?[["6b","Installation Method",methodLabel[result.derating.method]||"","IEC 60364-5-52 installation method classification"]]:[]),
+    ["7","Required Cable Capacity (Iz_req)",`${result.derating.reqI} A`,"Iz_req = Ib / (Kt × Cg × Carr) – minimum tabulated capacity"],
+    ["8","Selected Cable Section",result.cableRec.section,"Smallest standard section ≥ Iz_req"],
+    ["9","Nominal Cable Capacity (tabulated)",`${result.cableRec.nominal} A`,"From IEC 60364-5-52 or NEC Table 310.16"],
+    ["10","Derated Cable Capacity",`${result.cableRec.derated} A`,"Iz_actual = Iz_nom × Kt × Cg"],
+    ...(result.vdResult?[
+      ["11","Voltage Drop Calculated",`${result.vdResult.vd} %`,"ΔV% = (mV/A/m × Ib × L) / (400V × 1000) × 100"],
+      ["12","Voltage Drop Compliance",parseFloat(result.vdResult.vd)<=parseFloat(result.vdResult.max)?"PASS ✓":"FAIL ✗ – Upsize Cable",`Max allowed: ${result.vdResult.max}%`],
+    ]:[]),
+    ["FINAL","Main MCCB Rating",`${result.mccbA} A`,`Next standard size above Ib=${result.maxI.toFixed(1)} A`],
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(s3);
+  ws3["!cols"] = [{wch:8},{wch:38},{wch:30},{wch:55}];
+  ws3["!merges"] = [{s:{r:0,c:0},e:{r:0,c:3}},{s:{r:1,c:0},e:{r:1,c:3}}];
+  XLSX.utils.book_append_sheet(wb, ws3, "Calculation_Steps");
+
+  /* ── SHEET 4: REFERENCE TABLES ── */
+  const s4 = [
+    ["IEC 60364-5-52  |  COPPER XLPE CABLE CAPACITY TABLE  |  Reference Only","","","","","",""],
+    [""],
+    ["Section (mm²)","Rdc (mΩ/m)","Method B (A)","Method C (A)","Method D (A)","Free Air (A)","mV/A/m (3ph)"],
+    ...IEC_CABLE.map(r=>r),
+    [""],
+    ["NEC TABLE 310.16  |  COPPER THWN-2 (75°C)","","","","","",""],
+    ["AWG / kcmil","mm² equiv.","Capacity (A)","Resistance (mΩ/m)","","",""],
+    ...NEC_CABLE.map(r=>[r[0],r[1],r[2],r[3],"","",""]),
+    [""],
+    ["STANDARD BUSBAR SIZES  |  SOLID COPPER","","","","","",""],
+    ["Size (mm)","Capacity (A)","","","","",""],
+    ...BUSBAR_TABLE.map(r=>[r[0],r[1],"","","","",""]),
+  ];
+  const ws4 = XLSX.utils.aoa_to_sheet(s4);
+  ws4["!cols"] = [{wch:16},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14}];
+  ws4["!merges"] = [{s:{r:0,c:0},e:{r:0,c:6}}];
+  XLSX.utils.book_append_sheet(wb, ws4, "Reference_Tables");
+
+  XLSX.writeFile(wb, `Panel_Design_${proj.panelId||"MDB"}_${today.replace(/\//g,"-")}.xlsx`);
+}
+
+/* ═══════════════════════════════════════════════════════
+   MAIN APP
+═══════════════════════════════════════════════════════ */
+export default function App() {
+  const [std, setStd]     = useState("IEC60364");
+  const [result, setResult] = useState(null);
+  const [pdfReady, setPdfReady] = useState(false);
+  const [exporting, setExporting] = useState({pdf:false,xl:false});
+  const resultRef = useRef(null);
+
+  // Project info
+  const [proj, setProj] = useState({
+    projectName:"",client:"",projectNo:"",engineer:"",location:"",panelId:"MDB-01",
+  });
+  const setP = (k,v) => setProj(p=>({...p,[k]:v}));
+
+  // Shared breaker inputs
+  const [sh, setSh] = useState({sc:"12",sa:"16",tc:"2",ta:"32",df:"0.8"});
+  const setS = (k,v) => setSh(p=>({...p,[k]:v}));
+
+  // Standard-specific
+  const [iec, setIec] = useState({method:"conduit",temp:"45",length:"50",vdMax:"3",phases:"3ph"});
+  const [i61, setI61] = useState({condType:"flexible",encTemp:"45",arrangement:"touching",grouping:"4"});
+  const [nec, setNec] = useState({method:"conduit",temp:"45",length:"50",vdMax:"3",unit:"awg"});
+  const setI=(fn,k,v)=>fn(p=>({...p,[k]:v}));
+
+  const stdInfo = STANDARDS.find(s=>s.id===std);
+  const C = stdInfo.color;
+
+  // Load jsPDF from CDN
+  useEffect(()=>{
+    if(window.jspdf){setPdfReady(true);return;}
+    const s1=document.createElement("script");
+    s1.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s1.onload=()=>{
+      const s2=document.createElement("script");
+      s2.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js";
+      s2.onload=()=>setPdfReady(true);
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s1);
+  },[]);
+
+  useEffect(()=>setResult(null),[std]);
+
+  function calculate() {
+    const sc=parseInt(sh.sc)||0,sa=parseFloat(sh.sa)||0;
+    const tc=parseInt(sh.tc)||0,ta=parseFloat(sh.ta)||0;
+    const df=parseFloat(sh.df)||0.8;
+    const singles=Array.from({length:sc},(_,i)=>({id:i+1,a:sa,label:`F${i+1}`}));
+    const threes=Array.from({length:tc},(_,i)=>({id:i+1,a:ta,label:`3F${i+1}`}));
+    const {phases,totals}=distributeBreakers(singles,threes);
+    const dt={L1:totals.L1*df,L2:totals.L2*df,L3:totals.L3*df};
+    const maxI=Math.max(dt.L1,dt.L2,dt.L3);
+    const minI=Math.min(dt.L1,dt.L2,dt.L3);
+    const avgI=(dt.L1+dt.L2+dt.L3)/3;
+    const imbPct=avgI>0?((maxI-minI)/avgI)*100:0;
+
+    let cableRec={},mccbA=0,derating={},vdResult=null,condType=null,arrangement=null;
+
+    if(std==="IEC60364"){
+      const temp=parseFloat(iec.temp)||45,len=parseFloat(iec.length)||50,vdMax=parseFloat(iec.vdMax)||3;
+      const kt=getTempFactor(temp,"IEC60364");
+      const reqI=maxI/kt;
+      const checkVD=len>0&&vdMax>0;
+      const idx=findIECCable(reqI,iec.method,vdMax,maxI,len,checkVD);
+      const row=IEC_CABLE[idx],col=getIECCol(iec.method);
+      const nomCap=row[col],derated=(nomCap*kt).toFixed(1);
+      const vd=checkVD?calcVD(idx,maxI,len,"IEC60364"):null;
+      const idx0=findIECCable(reqI,iec.method,vdMax,maxI,len,false);
+      cableRec={section:`${row[0]} mm²`,sectionNum:row[0],nominal:nomCap,derated,conductor:"Copper (Cu) XLPE 90°C",config:`4 × ${row[0]} mm² Cu + PE`};
+      derating={kt:kt.toFixed(3),temp,method:iec.method,reqI:reqI.toFixed(1),length:len};
+      vdResult=vd?{vd:vd.toFixed(2),max:vdMax,driven:idx>idx0}:null;
+      mccbA=nextMCCB(Math.ceil(maxI),"IEC60364");
+    } else if(std==="IEC61439"){
+      const encTemp=parseFloat(i61.encTemp)||45;
+      const kt=getTempFactor(encTemp,"IEC60364");
+      const gfVal=parseInt(i61.grouping)<=1?1.0:parseInt(i61.grouping)<=3?0.85:parseInt(i61.grouping)<=5?0.75:parseInt(i61.grouping)<=7?0.70:0.65;
+      const arrFactor=i61.arrangement==="spaced"?1.0:0.9;
+      const reqI=maxI/(kt*gfVal*arrFactor);
+      if(i61.condType==="flexible"){
+        const idx=IEC_CABLE.findIndex(r=>r[5]>=reqI);const si=idx<0?IEC_CABLE.length-1:idx;const row=IEC_CABLE[si];
+        cableRec={section:`${row[0]} mm²`,sectionNum:row[0],nominal:row[5],derated:(row[5]*kt*gfVal*arrFactor).toFixed(1),conductor:"Cu Flexible Wire (IEC 60228 Cl.5)",config:`${row[0]} mm² Cu Flexible`};
+      } else {
+        const bb=BUSBAR_TABLE.find(([,c])=>c*(kt*arrFactor)>=maxI)||BUSBAR_TABLE[BUSBAR_TABLE.length-1];
+        cableRec={section:bb[0],sectionNum:bb[0],nominal:bb[1],derated:(bb[1]*kt*arrFactor).toFixed(1),conductor:"Solid Copper Busbar (99.9% Cu)",config:`Solid Cu Busbar ${bb[0]} mm`};
+      }
+      derating={kt:kt.toFixed(3),temp:encTemp,gf:gfVal.toFixed(2),arrF:arrFactor.toFixed(2),reqI:reqI.toFixed(1)};
+      condType=i61.condType;arrangement=i61.arrangement;
+      mccbA=nextMCCB(Math.ceil(maxI),"IEC60364");
+    } else {
+      const temp=parseFloat(nec.temp)||45,len=parseFloat(nec.length)||50,vdMax=parseFloat(nec.vdMax)||3;
+      const kt=getTempFactor(temp,"NEC");
+      const reqI=maxI/kt;
+      const checkVD=len>0&&vdMax>0;
+      const idx=findNECCable(reqI,vdMax,maxI,len,checkVD);
+      const row=NEC_CABLE[idx];
+      const vd=checkVD?calcVD(idx,maxI,len,"NEC"):null;
+      const idx0=findNECCable(reqI,vdMax,maxI,len,false);
+      cableRec={section:nec.unit==="mm2"?`${row[0]} ≈ ${row[1]} mm²`:row[0],sectionNum:row[0],nominal:row[2],derated:(row[2]*kt).toFixed(1),conductor:"Cu THWN-2 (75°C) – NEC 310.16",config:`${row[0]} Cu + Neutral + GND`};
+      derating={kt:kt.toFixed(3),temp,method:nec.method,reqI:reqI.toFixed(1),length:len};
+      vdResult=vd?{vd:vd.toFixed(2),max:vdMax,driven:idx>idx0}:null;
+      mccbA=nextMCCB(Math.ceil(maxI),"NEC");
+    }
+
+    setResult({phases,totals,dt,maxI,minI,avgI,imbPct,cableRec,derating,vdResult,mccbA,std,df,sc,sa,tc,ta,condType,arrangement});
+    setTimeout(()=>resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),150);
+  }
+
+  const handleExportPDF = async () => {
+    if(!pdfReady||!result)return;
+    setExporting(e=>({...e,pdf:true}));
+    setTimeout(()=>{
+      try{buildPDF(result,proj,stdInfo);}catch(e){console.error(e);}
+      setExporting(e=>({...e,pdf:false}));
+    },100);
+  };
+
+  const handleExportExcel = () => {
+    if(!result)return;
+    setExporting(e=>({...e,xl:true}));
+    setTimeout(()=>{
+      try{buildExcel(result,proj,stdInfo);}catch(e){console.error(e);}
+      setExporting(e=>({...e,xl:false}));
+    },100);
+  };
+
+  const ML={conduit:"Conduit (B)",trunking:"Trunking (B)",surface:"Surface (C)",tray:"Tray (C)",underground:"Buried (D)"};
+
+  return (
+    <>
+      <style>{CSS.replace("--cur:#00d4ff",`--cur:${C}`)}</style>
+      <div className="app" style={{"--cur":C}}>
+
+        {/* HEADER */}
+        <div className="hdr">
+          <div className="hdr-grid"/>
+          <div className="hdr-eye">⚡ Panel Design Calculator v3.0</div>
+          <h1>حاسبة تصميم اللوحات الكهربائية</h1>
+          <p>IEC 60364 · IEC 61439 · NEC / SBC 401  |  PDF & Excel Export</p>
+        </div>
+
+        {/* STANDARD SELECTOR */}
+        <div className="std-wrap">
+          <div className="std-lbl">اختر الكود الهندسي — Select Engineering Standard</div>
+          <div className="std-tabs">
+            {STANDARDS.map(s=>(
+              <div key={s.id} className={`std-tab${std===s.id?" act":""}`} style={{"--tc":s.color}} onClick={()=>setStd(s.id)}>
+                <div className="std-tab-flag">{s.flag}</div>
+                <div className="std-tab-name">{s.label}</div>
+                <div className="std-tab-sub">{s.sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="content">
+          {/* PROJECT INFO */}
+          <div className="sdiv">معلومات المشروع — Project Information</div>
+          <div className="card full" style={{"--ca":C}}>
+            <div className="card-hd"><span className="ci">📁</span>بيانات التقرير الهندسي</div>
+            <div className="fr">
+              <div className="fld"><label>اسم المشروع / Project Name</label><input placeholder="e.g. Office Building – Block A" value={proj.projectName} onChange={e=>setP("projectName",e.target.value)}/></div>
+              <div className="fld"><label>اسم العميل / Client</label><input placeholder="e.g. Ministry of Health" value={proj.client} onChange={e=>setP("client",e.target.value)}/></div>
+            </div>
+            <div className="fr">
+              <div className="fld"><label>رقم المشروع / Project No.</label><input placeholder="e.g. PRJ-2025-001" value={proj.projectNo} onChange={e=>setP("projectNo",e.target.value)}/></div>
+              <div className="fld"><label>اسم المهندس / Engineer</label><input placeholder="e.g. Eng. Ahmed Al-Rashidi" value={proj.engineer} onChange={e=>setP("engineer",e.target.value)}/></div>
+            </div>
+            <div className="fr">
+              <div className="fld"><label>الموقع / Location</label><input placeholder="e.g. Riyadh, KSA" value={proj.location} onChange={e=>setP("location",e.target.value)}/></div>
+              <div className="fld"><label>رمز اللوحة / Panel Tag ID</label><input placeholder="e.g. MDB-01 / DB-GF-A" value={proj.panelId} onChange={e=>setP("panelId",e.target.value)}/></div>
+            </div>
+          </div>
+
+          {/* BREAKERS */}
+          <div className="sdiv">القواطع والأحمال — Breaker Loads</div>
+          <div className="g2">
+            <div className="card" style={{"--ca":C}}>
+              <div className="card-hd"><span className="ci">1φ</span>القواطع الأحادية</div>
+              <div className="fr">
+                <div className="fld"><label>العدد</label><input type="number" min="0" placeholder="12" value={sh.sc} onChange={e=>setS("sc",e.target.value)}/></div>
+                <div className="fld"><label>السعة (A)</label><input type="number" min="1" placeholder="16" value={sh.sa} onChange={e=>setS("sa",e.target.value)}/></div>
+              </div>
+            </div>
+            <div className="card" style={{"--ca":C}}>
+              <div className="card-hd"><span className="ci">3φ</span>القواطع الثلاثية</div>
+              <div className="fr">
+                <div className="fld"><label>العدد (0 إذا لا يوجد)</label><input type="number" min="0" placeholder="2" value={sh.tc} onChange={e=>setS("tc",e.target.value)}/></div>
+                <div className="fld"><label>السعة (A)</label><input type="number" min="0" placeholder="32" value={sh.ta} onChange={e=>setS("ta",e.target.value)}/></div>
+              </div>
+            </div>
+            <div className="card full" style={{"--ca":C}}>
+              <div className="card-hd"><span className="ci">∑</span>معامل التفاوت — Diversity / Demand Factor</div>
+              <div className="fr">
+                <div className="fld"><label>المعامل (0.1 → 1.0)</label><input type="number" min="0.1" max="1" step="0.05" value={sh.df} onChange={e=>setS("df",e.target.value)}/></div>
+                <div className="fld">
+                  <label style={{color:C}}>القيمة: {parseFloat(sh.df)||0.8} ({Math.round((parseFloat(sh.df)||0.8)*100)}%)</label>
+                  <input type="range" min="0.5" max="1" step="0.05" value={sh.df} onChange={e=>setS("df",e.target.value)}/>
+                  <span className="hint">0.5 = تحميل جزئي · 1.0 = التحميل الكامل</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* IEC 60364 */}
+          {std==="IEC60364"&&(<>
+            <div className="sdiv" style={{color:"#00d4ff"}}>⚙ مدخلات IEC 60364 / BS 7671</div>
+            <div className="g2">
+              <div className="card" style={{"--ca":"#00d4ff"}}>
+                <div className="card-hd"><span className="ci">🌡</span>بيئة التمديد</div>
+                <div className="fr solo"><div className="fld"><label>طريقة التمديد</label>
+                  <select value={iec.method} onChange={e=>setI(setIec,"method",e.target.value)}>
+                    <option value="conduit">مواسير / Conduit — Method B</option>
+                    <option value="trunking">ترانك / Trunking — Method B</option>
+                    <option value="surface">سطح / Surface — Method C</option>
+                    <option value="tray">حوامل / Cable Tray — Method C</option>
+                    <option value="underground">مدفون / Direct Buried — Method D</option>
+                  </select>
+                </div></div>
+                <div className="fr">
+                  <div className="fld"><label>درجة الحرارة (°C)</label><input type="number" min="25" max="60" step="5" value={iec.temp} onChange={e=>setI(setIec,"temp",e.target.value)}/></div>
+                  <div className="fld"><label>نظام الأطوار</label>
+                    <select value={iec.phases} onChange={e=>setI(setIec,"phases",e.target.value)}>
+                      <option value="3ph">ثلاثي — 400V 3φ</option>
+                      <option value="1ph">أحادي — 230V 1φ</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="card" style={{"--ca":"#00d4ff"}}>
+                <div className="card-hd"><span className="ci">📉</span>هبوط الجهد</div>
+                <div className="fr">
+                  <div className="fld"><label>طول الكابل (م)</label><input type="number" min="1" placeholder="50" value={iec.length} onChange={e=>setI(setIec,"length",e.target.value)}/></div>
+                  <div className="fld"><label>أقصى هبوط (%)</label><input type="number" min="1" max="10" step="0.5" placeholder="3" value={iec.vdMax} onChange={e=>setI(setIec,"vdMax",e.target.value)}/><span className="hint">IEC: 3% تغذية · 5% نهائي</span></div>
+                </div>
+              </div>
+            </div>
+          </>)}
+
+          {/* IEC 61439 */}
+          {std==="IEC61439"&&(<>
+            <div className="sdiv" style={{color:"#00ff88"}}>⚙ مدخلات IEC 61439</div>
+            <div className="g2">
+              <div className="card" style={{"--ca":"#00ff88"}}>
+                <div className="card-hd"><span className="ci">🔌</span>نوع الموصل</div>
+                <div className="fr solo"><div className="fld"><label>نوع الموصل الداخلي</label>
+                  <select value={i61.condType} onChange={e=>setI(setI61,"condType",e.target.value)}>
+                    <option value="flexible">أسلاك مرنة — Flexible Cu Wires</option>
+                    <option value="busbar">بارات نحاسية — Solid Cu Busbars</option>
+                  </select>
+                </div></div>
+                <div className="fr solo"><div className="fld"><label>ترتيب الموصلات</label>
+                  <select value={i61.arrangement} onChange={e=>setI(setI61,"arrangement",e.target.value)}>
+                    <option value="touching">متلاصقة — Touching (×0.90)</option>
+                    <option value="spaced">متباعدة — Spaced (×1.00)</option>
+                  </select>
+                </div></div>
+              </div>
+              <div className="card" style={{"--ca":"#00ff88"}}>
+                <div className="card-hd"><span className="ci">🌡</span>درجة الحرارة الداخلية</div>
+                <div className="fr">
+                  <div className="fld"><label>درجة الحرارة داخل اللوحة (°C)</label><input type="number" min="30" max="60" step="5" placeholder="45" value={i61.encTemp} onChange={e=>setI(setI61,"encTemp",e.target.value)}/><span className="hint">عادةً +10°C فوق الخارج</span></div>
+                  <div className="fld"><label>عدد الموصلات (Grouping)</label>
+                    <select value={i61.grouping} onChange={e=>setI(setI61,"grouping",e.target.value)}>
+                      <option value="1">1 (×1.00)</option>
+                      <option value="3">2-3 (×0.85)</option>
+                      <option value="4">4-5 (×0.75)</option>
+                      <option value="6">6-7 (×0.70)</option>
+                      <option value="10">8+ (×0.65)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>)}
+
+          {/* NEC */}
+          {std==="NEC"&&(<>
+            <div className="sdiv" style={{color:"#ff9f1c"}}>⚙ مدخلات SBC 401 / NEC</div>
+            <div className="g2">
+              <div className="card" style={{"--ca":"#ff9f1c"}}>
+                <div className="card-hd"><span className="ci">🌡</span>بيئة التمديد</div>
+                <div className="fr solo"><div className="fld"><label>طريقة التمديد</label>
+                  <select value={nec.method} onChange={e=>setI(setNec,"method",e.target.value)}>
+                    <option value="conduit">Conduit (EMT/RMC)</option>
+                    <option value="tray">Cable Tray</option>
+                    <option value="underground">Underground</option>
+                  </select>
+                </div></div>
+                <div className="fr">
+                  <div className="fld"><label>درجة الحرارة (°C)</label><input type="number" min="21" max="52" step="3" placeholder="45" value={nec.temp} onChange={e=>setI(setNec,"temp",e.target.value)}/><span className="hint">خليجي: 45-50°C</span></div>
+                  <div className="fld"><label>وحدة القياس</label>
+                    <select value={nec.unit} onChange={e=>setI(setNec,"unit",e.target.value)}>
+                      <option value="awg">AWG / kcmil</option>
+                      <option value="mm2">mm² + AWG</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="card" style={{"--ca":"#ff9f1c"}}>
+                <div className="card-hd"><span className="ci">📉</span>هبوط الجهد</div>
+                <div className="fr">
+                  <div className="fld"><label>طول الكابل (م)</label><input type="number" min="1" placeholder="50" value={nec.length} onChange={e=>setI(setNec,"length",e.target.value)}/></div>
+                  <div className="fld"><label>أقصى هبوط (%)</label><input type="number" min="1" max="10" step="0.5" placeholder="3" value={nec.vdMax} onChange={e=>setI(setNec,"vdMax",e.target.value)}/><span className="hint">NEC: 3% Feeder · 2% Branch</span></div>
+                </div>
+              </div>
+            </div>
+          </>)}
+
+          <button className="calc-btn" style={{"--cur":C}} onClick={calculate}>
+            ⚡ احسب وفق {stdInfo.label}
+          </button>
+        </div>
+
+        {/* ═══ RESULTS ═══ */}
+        {result&&(
+          <div className="content" ref={resultRef}>
+            <div className="sdiv">النتائج — Results</div>
+            <div className="res-hdr">
+              <div className="res-title">📊 نتائج التصميم الكهربائي</div>
+              <div className="used-std" style={{background:`${C}15`,border:`1px solid ${C}40`,color:C}}>
+                ✔ {stdInfo.flag} {stdInfo.label}
+              </div>
+            </div>
+
+            {/* Phases */}
+            <div className="ph-row">
+              {["L1","L2","L3"].map((ph,i)=>{
+                const cls=["ph-l1","ph-l2","ph-l3"][i];
+                const pct=result.maxI>0?(result.dt[ph]/result.maxI)*100:0;
+                return(
+                  <div key={ph} className={`ph ${cls} anim a${i+1}`}>
+                    <div className="ph-n">{ph}</div>
+                    <div className="ph-v">{result.dt[ph].toFixed(1)}</div>
+                    <div className="ph-u">أمبير (بعد ×{result.df})</div>
+                    <div className="ph-r">خام: {result.totals[ph].toFixed(1)} A</div>
+                    <div className="ph-bar"><div className="ph-bar-f" style={{width:`${pct}%`}}/></div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{textAlign:"center",marginBottom:18}}>
+              <span className={`imb ${result.imbPct<5?"imb-ok":result.imbPct<15?"imb-warn":"imb-bad"}`}>
+                {result.imbPct<5?"✓ اتزان ممتاز":result.imbPct<15?"⚠ اتزان مقبول":"✗ يجب إعادة التوزيع"}
+                &nbsp;— عدم اتزان: {result.imbPct.toFixed(1)}%
+              </span>
+            </div>
+
+            {/* Distribution table */}
+            <div className="card full anim a2" style={{"--ca":C,marginBottom:16}}>
+              <div className="card-hd"><span className="ci">📋</span>جدول توزيع القواطع</div>
+              <div style={{overflowX:"auto"}}>
+                <table className="tbl">
+                  <thead><tr><th>الفازة</th><th>القواطع</th><th>العدد</th><th>إجمالي خام</th><th>بعد التفاوت</th></tr></thead>
+                  <tbody>
+                    {["L1","L2","L3"].map((ph,i)=>{
+                      const dc=["dot-l1","dot-l2","dot-l3"][i];
+                      const sg=result.phases[ph].filter(b=>!b.is3ph);
+                      const th=result.phases[ph].filter(b=>b.is3ph);
+                      const isMax=result.dt[ph]===result.maxI;
+                      return(
+                        <tr key={ph}>
+                          <td><span className={`dot ${dc}`}/>{ph}</td>
+                          <td style={{textAlign:"right",fontSize:11,maxWidth:220}}>
+                            {sg.map(b=><span key={b.id} className="tag" style={{background:"rgba(255,255,255,.05)",color:"#8ba0c0",marginLeft:3}}>{b.label}({b.a}A)</span>)}
+                            {th.map(b=><span key={b.id} className="tag" style={{background:`${C}15`,color:C,marginLeft:3}}>{b.label}(3φ-{b.a}A)</span>)}
+                          </td>
+                          <td>{sg.length+th.length}</td>
+                          <td>{result.totals[ph].toFixed(1)} A</td>
+                          <td style={{color:isMax?"#ff9f1c":"#00ff88",fontWeight:700}}>{result.dt[ph].toFixed(1)} A {isMax?"▲":""}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Derating */}
+            <div className="card full anim a3" style={{"--ca":C,marginBottom:16}}>
+              <div className="card-hd"><span className="ci">📐</span>عوامل التصحيح — Derating Factors</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                <table className="dte-t">
+                  <tbody>
+                    {result.derating.method&&<tr><td>طريقة التمديد</td><td>{ML[result.derating.method]||result.derating.method}</td></tr>}
+                    <tr><td>درجة الحرارة</td><td>{result.derating.temp}°C</td></tr>
+                    <tr><td>معامل الحرارة (Kt)</td><td>{result.derating.kt}</td></tr>
+                    {result.derating.gf&&<tr><td>معامل التجميع (Cg)</td><td>{result.derating.gf}</td></tr>}
+                    {result.derating.arrF&&<tr><td>معامل الترتيب</td><td>{result.derating.arrF}</td></tr>}
+                    <tr><td>الطاقة المطلوبة (Iz req)</td><td>{result.derating.reqI} A</td></tr>
+                  </tbody>
+                </table>
+                <div>
+                  <div style={{fontSize:11,color:"var(--txd)",marginBottom:8,fontWeight:700,letterSpacing:1}}>VOLTAGE DROP</div>
+                  {result.vdResult?(
+                    <>
+                      <div className={`vd-pill ${parseFloat(result.vdResult.vd)<=parseFloat(result.vdResult.max)?"vd-ok":"vd-bad"}`}>
+                        ΔV = {result.vdResult.vd}% {parseFloat(result.vdResult.vd)<=parseFloat(result.vdResult.max)?"✓ PASS":"✗ FAIL"}
+                      </div>
+                      <div style={{fontSize:11,color:"var(--txm)",marginTop:8,lineHeight:1.7}}>
+                        الحد الأقصى: <strong style={{color:C}}>{result.vdResult.max}%</strong><br/>
+                        {result.vdResult.driven&&<span style={{color:"#ffd60a"}}>⚡ المقطع انتُقي بسبب هبوط الجهد</span>}
+                      </div>
+                    </>
+                  ):<div style={{fontSize:12,color:"var(--txd)",marginTop:8}}>{std==="IEC61439"?"لا ينطبق — مسافات داخلية قصيرة":"—"}</div>}
+                </div>
+              </div>
+            </div>
+
+            {/* Recommendations */}
+            <div className="rec-row anim a4">
+              <div className="rec" style={{"--rc":C}}>
+                <div className="rec-lbl">🔌 الكابل / الموصل الرئيسي</div>
+                <div className="rec-val">{result.cableRec.section}</div>
+                <div className="rec-unit">{result.cableRec.conductor}</div>
+                <div className="rec-det">
+                  الطاقة الاسمية: <strong>{result.cableRec.nominal} A</strong><br/>
+                  الطاقة الفعلية: <strong>{result.cableRec.derated} A</strong><br/>
+                  التكوين: <strong>{result.cableRec.config}</strong>
+                </div>
+              </div>
+              <div className="rec" style={{"--rc":"#ff9f1c"}}>
+                <div className="rec-lbl">⚡ القاطع الرئيسي — MCCB</div>
+                <div className="rec-val" style={{color:"#ff9f1c"}}>{result.mccbA}</div>
+                <div className="rec-unit">أمبير — 3-Pole TP</div>
+                <div className="rec-det">
+                  أعلى تيار: <strong style={{color:"#ff9f1c"}}>{result.maxI.toFixed(1)} A</strong><br/>
+                  {std==="NEC"?"NEC 240.6 Standard Rating":"IEC 60947-2 MCCB"}<br/>
+                  <strong style={{color:"#ff9f1c"}}>Ics ≥ {std==="NEC"?"10":"25"} kA</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* ══ EXPORT SECTION ══ */}
+            <div className="exp-section anim a4">
+              <div className="exp-title">
+                <span>📤</span> تصدير التقرير الهندسي الاحترافي
+              </div>
+              <div className="exp-sub">
+                تصدير النتائج كتقرير PDF احترافي بتخطيط هندسي كامل، أو كملف Excel تفاعلي بأوراق متعددة — جاهز للتسليم والمراجعة الهندسية.
+              </div>
+              <div className="exp-btns">
+                {/* PDF Button */}
+                <button
+                  className={`exp-btn exp-btn-pdf${(!pdfReady||exporting.pdf)?" exp-loading":""}`}
+                  onClick={handleExportPDF}
+                >
+                  <div className="exp-shine"/>
+                  <div className="exp-btn-icon">📄</div>
+                  <div className="exp-btn-label">{exporting.pdf?"جاري التصدير...":"تقرير PDF"}</div>
+                  <div className="exp-btn-desc">
+                    تقرير هندسي 2 صفحة A4<br/>
+                    معلومات المشروع · توزيع الأحمال<br/>
+                    حسابات التصحيح · التوصيات<br/>
+                    خانة التوقيع والختم
+                  </div>
+                </button>
+                {/* Excel Button */}
+                <button
+                  className={`exp-btn exp-btn-xl${exporting.xl?" exp-loading":""}`}
+                  onClick={handleExportExcel}
+                >
+                  <div className="exp-shine"/>
+                  <div className="exp-btn-icon">📊</div>
+                  <div className="exp-btn-label">{exporting.xl?"جاري التصدير...":"ملف Excel"}</div>
+                  <div className="exp-btn-desc">
+                    4 أوراق عمل متكاملة<br/>
+                    Summary · Load Distribution<br/>
+                    Step-by-Step Calculations<br/>
+                    جداول IEC/NEC المرجعية
+                  </div>
+                </button>
+              </div>
+              {!pdfReady&&(
+                <div style={{textAlign:"center",fontSize:11,color:"var(--txd)",marginTop:12}}>
+                  ⏳ جاري تحميل مكتبة PDF... يرجى الانتظار لحظة
+                </div>
+              )}
+            </div>
+
+            <div className="note">
+              <strong>📌 مرجع الكود الهندسي المستخدم: {stdInfo.label}</strong><br/>
+              {std==="IEC60364"&&<>• IEC 60364-5-52:2009 · BS 7671:2018 · جداول IEC 60228<br/>• معامل تصحيح الحرارة من Table B.52.14 (أساس 30°C – XLPE 90°C)<br/>• هبوط الجهد محسوب بطريقة mV/A/m للدوائر المتوازنة ثلاثية الأطوار</>}
+              {std==="IEC61439"&&<>• IEC 61439-1:2011 / IEC 61439-2:2011 · تجميعات الجهد المنخفض<br/>• الطاقة الحاملة وفق Method E (Free Air) – IEC 60364-5-52 Table B.52.3<br/>• لا يُحسب هبوط الجهد للمسافات الداخلية (أقل من 2 متر)</>}
+              {std==="NEC"&&<>• NEC NFPA 70 / SBC 401 · Table 310.16 – Cu THWN-2 (75°C column)<br/>• تصحيح الحرارة: NEC 310.15(B)(2)(a) – أساس 30°C مع تطبيق قسري للأجواء الخليجية<br/>• تصنيف القاطع وفق NEC 240.6 Standard Ampere Ratings</>}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
